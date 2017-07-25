@@ -1,0 +1,19 @@
+name: base💯
+version: "0.1"
+author: Adam Niederer <adam.niederer@gmail.com>
+about: Encodes things into emoji
+args:
+  - encode:
+      short: e
+      long: encode
+      help: Tells base💯 to encode this data
+      takes_value: false
+  - decode:
+      short: d
+      long: decode
+      help: Tells base💯 to decode this data
+      takes_value: false
+  - input:
+      help: The input file to use
+      required: false
+      index: 1
