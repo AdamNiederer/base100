@@ -47,10 +47,10 @@ $ cat /dev/urandom | base100 | pv > /dev/null
 $ cat /dev/urandom | base64 | pv > /dev/null
  [ 232MiB/s]
 
-[adam@AdamsPC release]$ cat /dev/urandom | base100 | base100 -dF | pv > /dev/null
+$ cat /dev/urandom | base100 | base100 -dF | pv > /dev/null
  [ 223MiB/s]
 
-[adam@AdamsPC release]$ cat /dev/urandom | base64 | base64 -d | pv > /dev/null
+$ cat /dev/urandom | base64 | base64 -d | pv > /dev/null
  [ 176MiB/s]
 ```
 
