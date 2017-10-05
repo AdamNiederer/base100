@@ -1,5 +1,4 @@
 #![allow(non_upper_case_globals)]
-#![feature(io)]
 
 #[macro_use] extern crate clap;
 
