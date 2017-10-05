@@ -1,3 +1,5 @@
+[![crates.io](https://img.shields.io/crates/v/base100.svg)](https://crates.io/crates/base100)
+
 # Base💯
 
 Encode things into Emoji.
