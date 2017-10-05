@@ -13,6 +13,11 @@ args:
       long: decode
       help: Tells base💯 to decode this data
       takes_value: false
+  - fast:
+      short: F
+      long: fast
+      help: Go twice as fast, but crash on imperfect input (decode only)
+      takes_value: false
   - input:
       help: The input file to use
       required: false

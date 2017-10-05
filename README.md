@@ -9,7 +9,7 @@ represent binary data with zero printable overhead (see caveats for more info).
 
 ```
 $ echo "the quick brown fox jumped over the lazy dog" | base100
-⛷⛏⛅Ⓜ⛳⛸⛑⚾⛔Ⓜ⚽⛴⛱⛺⛰Ⓜ⛈⛱⛽Ⓜ⛓⛸⛪⛲⛅⛄Ⓜ⛱⛹⛅⛴Ⓜ⛷⛏⛅Ⓜ⛩⚱✅✂Ⓜ⛄⛱⛎↘
+👫👟👜🐗👨👬👠👚👢🐗👙👩👦👮👥🐗👝👦👯🐗👡👬👤👧👜👛🐗👦👭👜👩🐗👫👟👜🐗👣👘👱👰🐗👛👦👞🐁
 ```
 
 Base💯 will read from stdin unless a file is specified, will write UTF-8 to
@@ -24,6 +24,7 @@ USAGE:
 FLAGS:
     -d, --decode     Tells base💯 to decode this data
     -e, --encode     Tells base💯 to encode this data
+    -F, --fast       Go twice as fast, but crash on imperfect input (decode only)
     -h, --help       Prints help information
     -V, --version    Prints version information
 
@@ -40,22 +41,25 @@ __printable__ characters as possible.
 ## Performance
 
 ```
-$ cat /dev/zero | base100 | pv > /dev/null
-778MiB 0:00:05 [ 178MiB/s]
+$ cat /dev/urandom | base100 | pv > /dev/null
+ [ 502MiB/s]
 
-$ cat /dev/zero | base64 | pv > /dev/null
-4.09GiB 0:00:05 [ 850MiB/s]
+$ cat /dev/urandom | base64 | pv > /dev/null
+ [ 232MiB/s]
 
-$ cat /dev/zero | base100 | base100 -d | pv > /dev/null
-156MiB 0:00:05 [31.7MiB/s]
+[adam@AdamsPC release]$ cat /dev/urandom | base100 | base100 -dF | pv > /dev/null
+ [ 223MiB/s]
 
-$ cat /dev/zero | base64 | base64 -d | pv > /dev/null
- 903MiB 0:00:05 [ 169MiB/s]
+[adam@AdamsPC release]$ cat /dev/urandom | base64 | base64 -d | pv > /dev/null
+ [ 176MiB/s]
 ```
 
-Encoding and decoding are fairly slow because of the algorithm's reliance on
-external data structures. This could probably be remedied in the future.
+In both scenarios, base💯 compares favorably to GNU base64. It should be noted
+that base100 in fast-mode sacrifices all sanity checks and makes zero guarantees
+about gracefully handling malformed input.
 
 ## Future plans
 
 - Allow data to be encoded with the full 1024-element emoji set
+- Add further optimizations and ensure we're abusing SIMD as much as possible
+- Make fast mode less fragile while maintaining fastness
