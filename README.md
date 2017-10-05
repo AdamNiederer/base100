@@ -38,7 +38,9 @@ ARGS:
 
 Base💯 is *very* space inefficient. It bloats the size of your data by around 3x,
 and should only be used if you have to display encoded binary data in as few
-__printable__ characters as possible.
+__printable__ characters as possible. It is, however, very suitable for human
+interaction. Encoded hashes and checksums become very easy to verify at a glance,
+and take up much less space on a terminal.
 
 ## Performance
 
