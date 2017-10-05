@@ -43,6 +43,12 @@ __printable__ characters as possible.
 ## Performance
 
 ```
+$ base100 --version
+base💯 0.2.0
+
+$ base64 --version
+base64 (GNU coreutils) 8.28
+
 $ cat /dev/urandom | base100 | pv > /dev/null
  [ 502MiB/s]
 
@@ -57,8 +63,9 @@ $ cat /dev/urandom | base64 | base64 -d | pv > /dev/null
 ```
 
 In both scenarios, base💯 compares favorably to GNU base64. It should be noted
-that base100 in fast-mode sacrifices all sanity checks and makes zero guarantees
-about gracefully handling malformed input.
+that base💯 in fast-mode sacrifices all sanity checks and makes zero guarantees
+about gracefully handling malformed input. base💯 also bloats the size of the
+output more than base64, making these readings somewhat exaggerated.
 
 ## Future plans
 
