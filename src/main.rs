@@ -23,7 +23,7 @@ use std::char;
 use std::iter::Iterator;
 use clap::App;
 
-const base: u32 = 127991;
+const base: u32 = 127_991;
 
 fn main() {
     let cli_spec = load_yaml!("cli.yml");
@@ -44,8 +44,8 @@ fn main() {
     };
 
     let mut writer = BufWriter::new(io::stdout());
-    let mut write_buf = [0u8; 65536];
-    let mut buffer = [0u8; 65536];
+    let mut write_buf = [0u8; 0x1_0000];
+    let mut buffer = [0u8; 0x1_0000];
 
     if cli_args.is_present("decode") {
         while let Ok(num_read) = reader.read(&mut buffer) {
@@ -82,7 +82,7 @@ fn main() {
             }
 
             for byte in buffer.iter().take(num_read) {
-                let ch: char = char::from_u32(base + (*byte as u32)).unwrap();
+                let ch: char = char::from_u32(base + u32::from(*byte)).unwrap();
                 match writer.write(ch.encode_utf8(&mut write_buf).as_bytes()) {
                     Ok(_) => (),
                     _ => {
