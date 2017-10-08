@@ -64,8 +64,7 @@ $ cat /dev/urandom | pv | base64 | base64 -d > /dev/null
  [ 176MiB/s]
 ```
 
-In both scenarios, base💯 compares favorably to GNU base64. base💯 also bloats
-the size of the output more than base64, so divide the
+In both scenarios, base💯 compares favorably to GNU base64.
 
 ## Future plans
 
