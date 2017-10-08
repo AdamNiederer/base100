@@ -147,8 +147,21 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
     out
 }
 
-// #[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
+#[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
 pub fn char_to_emoji<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b [u8] {
+    for (i, ch) in buf.iter().enumerate() {
+        out[4 * i + 0] = 0xf0;
+        out[4 * i + 1] = 0x9f;
+        out[4 * i + 2] = (((*ch as u16).wrapping_add(55)) / 64 + 143) as u8;
+        out[4 * i + 3] = (ch.wrapping_add(55) % 64).wrapping_add(128);
+    }
+    out
+}
+
+#[cfg(feature = "simd")]
+#[cfg(target_feature = "sse2")]
+pub fn char_to_emoji<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b [u8] {
+    // TODO: SSE this up
     for (i, ch) in buf.iter().enumerate() {
         out[4 * i + 0] = 0xf0;
         out[4 * i + 1] = 0x9f;

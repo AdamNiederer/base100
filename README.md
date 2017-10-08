@@ -52,7 +52,7 @@ $ base64 --version
 base64 (GNU coreutils) 8.28
 
 $ cat /dev/urandom | base100 | pv > /dev/null
- [ 502MiB/s]
+ [ 940MiB/s]
 
 $ cat /dev/urandom | base64 | pv > /dev/null
  [ 232MiB/s]
