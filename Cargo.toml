@@ -8,6 +8,10 @@ license = "AGPL-3.0"
 
 [dependencies]
 clap = {version = "2.19", features = ["yaml"]}
+stdsimd = {git = "https://github.com/rust-lang-nursery/stdsimd.git", optional = true}
+
+[features]
+simd = ["stdsimd"]
 
 [profile.release]
 opt-level = 3
