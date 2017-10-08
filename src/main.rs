@@ -22,12 +22,9 @@
 #[cfg(feature = "simd")] extern crate stdsimd;
 
 use std::io::{self, Read, Write, BufRead, BufReader, BufWriter};
-use std::fs::{File};
-use std::char;
+use std::fs::File;
 use std::iter::Iterator;
 use clap::App;
-
-const base: u32 = 127991;
 
 fn main() {
     let cli_spec = load_yaml!("cli.yml");
@@ -48,10 +45,11 @@ fn main() {
     };
 
     let mut writer = BufWriter::new(io::stdout());
-    let mut write_buf = [0u8; 65536];
-    let mut buffer = [0u8; 65536];
 
     if cli_args.is_present("decode") {
+        let mut write_buf = [0u8; 0x10000];
+        let mut buffer = [0u8; 0x10000];
+
         while let Ok(num_read) = reader.read(&mut buffer) {
             if num_read == 0 {
                 break;
@@ -66,19 +64,19 @@ fn main() {
             }
         }
     } else {
+        let mut write_buf = [0u8; 0x40000];
+        let mut buffer = [0u8; 0x10000];
+
         while let Ok(num_read) = reader.read(&mut buffer) {
             if num_read == 0 {
                 break;
             }
 
-            for byte in buffer.iter().take(num_read) {
-                let ch: char = char::from_u32(base + (*byte as u32)).unwrap();
-                match writer.write_all(&ch.encode_utf8(&mut write_buf).as_bytes()) {
-                    Ok(_) => (),
-                    _ => {
-                        writeln!(io::stderr(), "base💯: write error").expect("base💯: stderr write error");
-                        return;
-                    }
+            match writer.write_all(&char_to_emoji(&buffer[..num_read], &mut write_buf)[..num_read * 4]) {
+                Ok(_) => (),
+                _ => {
+                    writeln!(io::stderr(), "base💯: write error").expect("base💯: stderr write error");
+                    return;
                 }
             }
         }
@@ -145,6 +143,17 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
                 .store(out, i);
             i += 16;
         }
+    }
+    out
+}
+
+// #[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
+pub fn char_to_emoji<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b [u8] {
+    for (i, ch) in buf.iter().enumerate() {
+        out[4 * i + 0] = 0xf0;
+        out[4 * i + 1] = 0x9f;
+        out[4 * i + 2] = (((*ch as u16).wrapping_add(55)) / 64 + 143) as u8;
+        out[4 * i + 3] = (ch.wrapping_add(55) % 64).wrapping_add(128);
     }
     out
 }
