@@ -2,7 +2,7 @@
 name = "base100"
 description = "Encode your data into emoji"
 repository = "https://github.com/AdamNiederer/base100"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Adam Niederer <Adam.Niederer@gmail.com>"]
 license = "AGPL-3.0"
 

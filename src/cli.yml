@@ -1,5 +1,5 @@
 name: base💯
-version: "0.2.0"
+version: "0.3.0"
 author: Adam Niederer <adam.niederer@gmail.com>
 about: Encodes things into emoji
 args:

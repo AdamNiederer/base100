@@ -46,7 +46,7 @@ and take up much less space on a terminal.
 
 ```
 $ base100 --version
-base💯 0.2.0
+base💯 0.3.0
 
 $ base64 --version
 base64 (GNU coreutils) 8.28
