@@ -26,7 +26,6 @@ USAGE:
 FLAGS:
     -d, --decode     Tells base💯 to decode this data
     -e, --encode     Tells base💯 to encode this data
-    -F, --fast       Go twice as fast, but crash on imperfect input (decode only)
     -h, --help       Prints help information
     -V, --version    Prints version information
 
@@ -70,4 +69,3 @@ In both scenarios, base💯 compares favorably to GNU base64.
 
 - Allow data to be encoded with the full 1024-element emoji set
 - Add further optimizations and ensure we're abusing SIMD as much as possible
-- Make fast mode less fragile while maintaining fastness
