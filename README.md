@@ -51,23 +51,21 @@ base💯 0.2.0
 $ base64 --version
 base64 (GNU coreutils) 8.28
 
-$ cat /dev/urandom | base100 | pv > /dev/null
- [ 940MiB/s]
+$ cat /dev/urandom | pv | base100 > /dev/null
+ [ 247MiB/s]
 
-$ cat /dev/urandom | base64 | pv > /dev/null
+$ cat /dev/urandom | pv | base64 > /dev/null
  [ 232MiB/s]
 
-$ cat /dev/urandom | base100 | base100 -dF | pv > /dev/null
- [ 223MiB/s]
+$ cat /dev/urandom | pv | base100 | base100 -d > /dev/null
+ [ 233MiB/s]
 
-$ cat /dev/urandom | base64 | base64 -d | pv > /dev/null
+$ cat /dev/urandom | pv | base64 | base64 -d > /dev/null
  [ 176MiB/s]
 ```
 
-In both scenarios, base💯 compares favorably to GNU base64. It should be noted
-that base💯 in fast-mode sacrifices all sanity checks and makes zero guarantees
-about gracefully handling malformed input. base💯 also bloats the size of the
-output more than base64, making these readings somewhat exaggerated.
+In both scenarios, base💯 compares favorably to GNU base64. base💯 also bloats
+the size of the output more than base64, so divide the
 
 ## Future plans
 
