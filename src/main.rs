@@ -97,119 +97,75 @@ fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
 #[cfg(target_feature = "avx2")]
 pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
     use stdsimd::simd::u8x32;
-    use stdsimd::vendor::{_mm256_packus_epi32, _mm256_packus_epi16, _mm256_and_si256, _mm256_shuffle_pd};
     let mut i = 0;
     for chunk in buf.chunks(128) {
         if chunk.len() < 128 {
             // Non-SIMD implementation for the final <128 bytes
-            for (i, chunk) in chunk.chunks(4).enumerate() {
-                out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
+            for chunk in chunk.chunks(4) {
+                out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55);
+                i += 1;
             }
         } else {
             // AVX implementation of decoding algo
             // a, b, c, d contain one garbage word and one useful word
-            let a_dirty = u8x32::load(chunk, i);
-            let b_dirty = u8x32::load(chunk, i + 32);
-            let c_dirty = u8x32::load(chunk, i + 64);
-            let d_dirty = u8x32::load(chunk, i + 96);
-            let dirty_mask = u8x32::new(0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF,
-                                        0x00, 0x00, 0xFF, 0xFF);
+            let a = u8x32::load(chunk, 0);
+            let b = u8x32::load(chunk, 32);
+            let c = u8x32::load(chunk, 64);
+            let d = u8x32::load(chunk, 96);
 
-            let hi_mask = u8x32::new(0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00);
+            // Constant mask for removing low bytes
+            let hi_mask = u8x32::new(0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00);
 
-            let lo_mask = u8x32::new(0x80, 0x00, 0x80, 0x02, 0x80, 0x04, 0x80, 0x06,
-                                     0x80, 0x08, 0x80, 0x0A, 0x80, 0x0C, 0x80, 0x0E,
-                                     0x80, 0x10, 0x80, 0x12, 0x80, 0x14, 0x80, 0x16,
-                                     0x80, 0x18, 0x80, 0x1A, 0x80, 0x1C, 0x80, 0x1E);
-
+            // Results from the vector magic below
             let hi: u8x32;
             let lo: u8x32;
 
-            // x1 .. x4 now contain 0x00, 0x00, 0xhi, 0xlo ...
-            // x1 and x2 now contain interleaved high and low bytes
-            // x1 contains 0x00 0xhi, x2 0x00 0xlo, etc.
-            // x1 now contains all the lo bytes, x2 has all the hi bytes
             unsafe {
                 asm! {
-                    "vpand x1, x1, xm
-                     vpand x2, x2, xm
-                     vpand x3, x3, xm
-                     vpand x4, x4, xm
+                    "vpsrld ymm1, ymm1, 16
+                     vpsrld ymm2, ymm2, 16
+                     vpsrld ymm3, ymm3, 16
+                     vpsrld ymm4, ymm4, 16
+                     // ymm1 .. ymm4 now contain 0x00, 0x00, 0xhi, 0xlo ...
 
-                     vpackusdw x1, x1, x2
-                     vpackusdw x2, x3, x4
+                     // Pack ymm* into ymm1 and ymm2 and order them properly
+                     vpackusdw ymm1, ymm1, ymm2
+                     vpackusdw ymm2, ymm3, ymm4
+                     // vpackusdw interleaves ymm[13] and ymm[24; we want them end-to-end
+                     vpermpd ymm1, ymm1, 0xD8 // [191:128] <-> [127:64]
+                     vpermpd ymm2, ymm2, 0xD8 // [191:128] <-> [127:64]
+                     // ymm1 and ymm2 now contain interleaved high and low bytes
 
-                     vpshufb x3, x2, xh
-                     vpshufb x4, x2, xl
-                     vpshufb x1, x1, xh
-                     vpshufb x2, x1, xl
+                     // Store high bytes (0xhi 0x00) in ymm3 and ymm4
+                     vpand ymm3, ymm1, ymm6
+                     vpand ymm4, ymm2, ymm6
+                     // Pack hi bytes into ymm4
+                     vpackuswb ymm4, ymm3, ymm4
 
-                     vpackuswb x1, x2, x4
-                     vpackuswb x2, x1, x3
+                     // Remove the high bytes and move low bytes into position
+                     vpsrlw ymm1, ymm1, 8
+                     vpsrlw ymm2, ymm2, 8
+                     // Store low bytes in ymm3
+                     vpackuswb ymm3, ymm1, ymm2
 
-                     vpshufb x2, x1, xl"
-                     : "={x1}"(lo), "={x2}"(hi)
-                     : "{x1}"(a_dirty), "{x2}"(b_dirty), "{x3}"(c_dirty),
-                       "{x4}"(d_dirty), "{xm}"(dirty_mask), "{xh}"(hi_mask)
-                       "{xl}"(lo_mask)
-                    : "cc"
-                    : "intel"
+                     // Fight interleaving again
+                     vpermpd ymm4, ymm4, 0xD8 // [191:128] <-> [127:64]
+                     vpermpd ymm3, ymm3, 0xD8 // [191:128] <-> [127:64]"
+                     : "={ymm3}"(lo), "={ymm4}"(hi)
+                     : "{ymm1}"(a), "{ymm2}"(b), "{ymm3}"(c),
+                       "{ymm4}"(d), "{ymm6}"(hi_mask)
+                     : "cc"
+                     : "intel"
                 }
             }
-            // Make a, b, c, d contain one 0x00 and one userful word
-
-
-            // // Pack useful words of a, b, c, d
-            // let a_interleaved = _mm256_packus_epi32(a_dirty_masked, b_dirty_masked).as_u8x32();
-            // let b_interleaved = _mm256_packus_epi32(c_dirty_masked, d_dirty_masked).as_u8x32();
-
-            // Shuffle bytes in words and zero out the high bit
-
-            // let a_hi_masked = _mm256_and_si256(a_interleaved, hi_mask);
-            // let b_hi_masked = _mm256_and_si256(b_interleaved, hi_mask);
-
-
-            // unsafe {
-            //     asm! {
-            //         : "r" (a)
-            //         : "%xmm15"
-
-            //     }
-            // }
-
-
-            // let a_lo_masked = _mm256_shuffle_epi8(a_interleaved, lo_mask).as_i16x16();
-            // let b_lo_masked = _mm256_shuffle_epi8(b_interleaved, lo_mask).as_i16x16();
-
-            // All high bits
-            // let hi = _mm256_packus_epi16(a_hi_masked, b_hi_masked);
-            // // All low bits
-            // let lo = _mm256_packus_epi16(a_lo_masked, b_lo_masked);
 
             ((((hi - u8x32::splat(143)) * u8x32::splat(64))
               + lo - u8x32::splat(128)) - u8x32::splat(55))
                 .store(out, i);
-
-            // TODO: Use Get rid of these scalar loads
-            // let msbs = u8x32::new(chunk[2], chunk[6], chunk[10], chunk[14], chunk[18], chunk[22], chunk[26], chunk[30], chunk[34], chunk[38], chunk[42], chunk[46], chunk[50], chunk[54], chunk[58], chunk[62], chunk[66], chunk[70], chunk[74], chunk[78], chunk[82], chunk[86], chunk[90], chunk[94], chunk[98], chunk[102], chunk[106], chunk[110], chunk[114], chunk[118], chunk[122], chunk[126]);
-            // let lsbs = u8x32::new(chunk[3], chunk[7], chunk[11], chunk[15], chunk[19], chunk[23], chunk[27], chunk[31], chunk[35], chunk[39], chunk[43], chunk[47], chunk[51], chunk[55], chunk[59], chunk[63], chunk[67], chunk[71], chunk[75], chunk[79], chunk[83], chunk[87], chunk[91], chunk[95], chunk[99], chunk[103], chunk[107], chunk[111], chunk[115], chunk[119], chunk[123], chunk[127]);
-            // ((((msbs - u8x32::splat(143)) * u8x32::splat(64))
-            //   + lsbs - u8x32::splat(128)) - u8x32::splat(55))
-            //     .store(out, i);
-            i += 128;
+            i += 32;
         }
     }
     out
