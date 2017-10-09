@@ -106,6 +106,55 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
             }
         } else {
             // AVX implementation of decoding algo
+            // a, b, c, d contain one garbage word and one useful word
+            let a_dirty = u8x32::load(chunk, i);
+            let b_dirty = u8x32::load(chunk, i + 32);
+            let c_dirty = u8x32::load(chunk, i + 64);
+            let d_dirty = u8x32::load(chunk, i + 96);
+            let dirty_mask = i8x32::new(0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF,
+                                        0x00, 0x00, 0xFF, 0xFF);
+            // Make a, b, c, d contain one 0x00 and one userful word
+            let a_dirty_masked = _mm256_and_si256(a_dirty, dirty_mask);
+            let b_dirty_masked = _mm256_and_si256(b_dirty, dirty_mask);
+            let c_dirty_masked = _mm256_and_si256(c_dirty, dirty_mask);
+            let d_dirty_masked = _mm256_and_si256(d_dirty, dirty_mask);
+
+            // Pack useful words of a, b, c, d
+            let a_interleaved = _mm256_packus_epi32(a_dirty_masked, b_dirty_masked) as u8x32;
+            let b_interleaved = _mm256_packus_epi32(c_dirty_masked, d_dirty_masked) as u8x32;
+
+            // Shuffle bytes in words and zero out the high bit
+            let hi_mask = i8x32::new(0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00);
+
+            let lo_mask = i8x32::new(0x80, 0x00, 0x80, 0x02, 0x80, 0x04, 0x80, 0x06,
+                                     0x80, 0x08, 0x80, 0x0A, 0x80, 0x0C, 0x80, 0x0E,
+                                     0x80, 0x10, 0x80, 0x12, 0x80, 0x14, 0x80, 0x16,
+                                     0x80, 0x18, 0x80, 0x1A, 0x80, 0x1C, 0x80, 0x1E);
+
+            let a_hi_masked = _mm256_and_si256(a_interleaved, hi_mask);
+            let b_hi_masked = _mm256_and_si256(b_interleaved, hi_mask);
+            let a_lo_masked = _mm256_shuffle_epi8(a_interleaved, lo_mask);
+            let b_lo_masked = _mm256_shuffle_epi8(b_interleaved, lo_mask);
+
+            let hi = _mm256_packus_epi16(a_hi_masked, b_hi_masked);
+            let lo = _mm256_packus_epi16(a_lo_masked, b_lo_masked);
+
+            ((((hi - u8x32::splat(143)) * u8x32::splat(64))
+              + lo - u8x32::splat(128)) - u8x32::splat(55))
+                .store(out, i);
 
             // TODO: Use Get rid of these scalar loads
             let msbs = u8x32::new(chunk[2], chunk[6], chunk[10], chunk[14], chunk[18], chunk[22], chunk[26], chunk[30], chunk[34], chunk[38], chunk[42], chunk[46], chunk[50], chunk[54], chunk[58], chunk[62], chunk[66], chunk[70], chunk[74], chunk[78], chunk[82], chunk[86], chunk[90], chunk[94], chunk[98], chunk[102], chunk[106], chunk[110], chunk[114], chunk[118], chunk[122], chunk[126]);
