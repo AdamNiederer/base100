@@ -120,7 +120,7 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
 }
 
 #[cfg(feature = "simd")]
-#[cfg(target_feature = "sse2")]
+#[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
 pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
     use stdsimd::simd::u8x16;
     let mut i = 0;
