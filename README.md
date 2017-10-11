@@ -43,6 +43,10 @@ and take up much less space on a terminal.
 
 ## Performance
 
+base💯's performance is very competitive with other encoding algorithms.
+
+### Scalar Performance
+
 ```
 $ base100 --version
 base💯 0.3.0
@@ -65,7 +69,34 @@ $ cat /dev/urandom | pv | base64 | base64 -d > /dev/null
 
 In both scenarios, base💯 compares favorably to GNU base64.
 
+### SIMD Performance
+
+On a machine supporting AVX2, base💯 gains around 25% performance through a
+decoder written in hand-tuned x86-64 assembly. Support for SSE2 will come soon,
+and I will happily support AVX-512 if some compatible hardware finds its way into
+my hands. Work on a vectorized encoder for AVX2 and SSE2 is also underway.
+
+Please note that the below benchmarks were taken on a significantly weaker
+machine than the above benchmarks, and cannot be directly compared.
+
+```
+$ base100 --version
+base💯 0.3.0-dirty
+
+$ base64 --version
+base64 (GNU coreutils) 8.28
+
+$ cat /dev/zero | pv | ./base100 | ./base100 -d > /dev/null
+ [ 191MiB/s]
+
+$ cat /dev/zero | pv | base64 | base64 -d > /dev/null
+ [ 110MiB/s]
+```
+
+In this scenario, base💯 compares very favorably to GNU base64.
+
 ## Future plans
 
 - Allow data to be encoded with the full 1024-element emoji set
 - Add further optimizations and ensure we're abusing SIMD as much as possible
+- Add multiprocessor support
