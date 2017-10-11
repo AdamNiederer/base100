@@ -15,8 +15,8 @@
 
 #![allow(non_upper_case_globals)]
 #![cfg_attr(test, feature(test))]
-#![cfg_attr(feature = "simd", feature(target_feature))]
 #![cfg_attr(feature = "simd", feature(asm))]
+#![cfg_attr(feature = "simd", feature(target_feature))]
 #![cfg_attr(feature = "simd", feature(cfg_target_feature))]
 
 #[macro_use] extern crate clap;
@@ -86,7 +86,7 @@ fn main() {
 }
 
 #[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
-fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
+fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, chunk) in buf.chunks(4).enumerate() {
         out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
     }
@@ -95,7 +95,7 @@ fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
 
 #[cfg(feature = "simd")]
 #[cfg(target_feature = "avx2")]
-pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
+pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     use stdsimd::simd::u8x32;
     let mut i = 0;
     for chunk in buf.chunks(128) {
@@ -114,10 +114,10 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
             let d = u8x32::load(chunk, 96);
 
             // Constant mask for removing low bytes
-            let hi_mask = u8x32::new(0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00,0xFF, 0x00, 0xFF, 0x00);
+            let hi_mask = u8x32::new(0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00);
 
             // Results from the vector magic below
             let hi: u8x32;
@@ -134,7 +134,7 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
                      // Pack ymm* into ymm1 and ymm2 and order them properly
                      vpackusdw ymm1, ymm1, ymm2
                      vpackusdw ymm2, ymm3, ymm4
-                     // vpackusdw interleaves ymm[13] and ymm[24; we want them end-to-end
+                     // vpackusdw interleaves ymm[13] and ymm[24]; we want them end-to-end
                      vpermpd ymm1, ymm1, 0xD8 // [191:128] <-> [127:64]
                      vpermpd ymm2, ymm2, 0xD8 // [191:128] <-> [127:64]
                      // ymm1 and ymm2 now contain interleaved high and low bytes
@@ -173,7 +173,7 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
 
 #[cfg(feature = "simd")]
 #[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
-pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
+pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     use stdsimd::simd::u8x16;
     let mut i = 0;
     for chunk in buf.chunks(64) {
@@ -200,7 +200,7 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b[u8] {
 }
 
 #[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
-pub fn char_to_emoji<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b [u8] {
+pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, ch) in buf.iter().enumerate() {
         out[4 * i + 0] = 0xf0;
         out[4 * i + 1] = 0x9f;
