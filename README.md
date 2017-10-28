@@ -73,10 +73,18 @@ In both scenarios, base💯 compares favorably to GNU base64.
 
 On a machine supporting AVX2, base💯 gains a 4x performance boost via some
 hand-tuned x86-64 assembly. Support for SSE2 will come soon, and I will happily
-support AVX-512 if some compatible hardware finds its way into my hands. Work on
-a vectorized encoder for SSE2 is also underway. Note that you must build base💯
-on a compatible machine with nightly rust, an AVX2-capable processor, and
-`RUSTFLAGS="-C target-cpu-native"` to receive this boost.
+support AVX-512 if some compatible hardware finds its way into my hands.
+
+To receive this speedup: you must use:
+- An AVX2-capable processor (Newer than Broadwell, or Zen)
+- Nightly Rust
+
+To build the SIMD-accelerated version, simply go to your project directory and
+type
+
+```shell
+$ RUSTFLAGS="-C target-cpu=native" cargo +nightly build --release --features simd
+```
 
 Please note that the below benchmarks were taken on a significantly weaker
 machine than the above benchmarks, and cannot be directly compared.
