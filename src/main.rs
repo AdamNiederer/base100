@@ -213,8 +213,111 @@ pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
 }
 
 #[cfg(feature = "simd")]
-#[cfg(target_feature = "sse2")]
-pub fn char_to_emoji<'a, 'b>(buf: &'a[u8], out: &'b mut [u8]) -> &'b [u8] {
+#[cfg(target_feature = "avx2")]
+pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+    use stdsimd::simd::{u8x32, u16x16, i16x16};
+    use stdsimd::vendor::{_mm256_unpackhi_epi8, _mm256_unpacklo_epi8, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16};
+
+    let mut i = 0;
+    for chunk in buf.chunks(32) {
+        if chunk.len() < 32 {
+            // Non-SIMD implementation for the final <128 bytes
+            for (i, ch) in buf.iter().enumerate() {
+                out[4 * i + 0] = 0xf0;
+                out[4 * i + 1] = 0x9f;
+                // (ch + 55) >> 6 approximates (ch + 55) / 64
+                out[4 * i + 2] = ((((*ch as u16).wrapping_add(55)) >> 6) + 143) as u8;
+                // (ch + 55) & 0x3f approximates (ch + 55) % 64
+                out[4 * i + 3] = (ch.wrapping_add(55) & 0x3f).wrapping_add(128);
+            }
+        } else {
+
+            let bytes = u8x32::load(chunk, 0);
+            let asm_out: u8x32;
+            // Constant mask for removing high bytes
+            let lo_mask = u8x32::new(0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF);
+
+            // Do the cast-to-u16 addition, shift right, then cast back down to u8.
+            unsafe {
+                asm! {
+                    "// Cast each byte to a word, moving to ymm1 and ymm2
+                     vmovddup ymm2, ymm1
+                     vandpd ymm2, ymm2, ymm3
+                     vpsrlw ymm1, ymm1, 8
+                     // ymm1 now contains the high bytes as u16s
+                     // ymm2 now contains the low bytes as u16s
+                     // Do the 16-bit addition
+                     vpaddw ymm1, ymm1, ymm4
+                     vpaddw ymm2, ymm1, ymm4
+                     // Shift right and convert back to u8s
+                     vpsrlw ymm1, ymm1, 6
+                     vpsrlw ymm2, ymm2, 6
+                     vpackuswb ymm1, ymm1, ymm2
+                     // Prevent interleaving
+                     vpermpd ymm4, ymm4, 0xD8 // [191:128] <-> [127:64]"
+                     : "={ymm1}"(asm_out)
+                     : "{ymm1}"(bytes), "{ymm3}"(lo_mask), "{ymm4}"(u16x16::splat(31)) // TODO: Why is this not 55?
+                     : "cc ymm2"
+                     : "intel"
+                }
+            }
+
+            let third = asm_out + u8x32::splat(143);
+            // let third = unsafe {
+            //     TODO: Replace above ASM with this
+            //     _mm256_packus_epi16(((i16x16::from(bytes) >> 8) + i16x16::splat(55)) >> 6,
+            //                         (i16x16::from(bytes & lo_mask) + i16x16::splat(55)) >> 6)
+            //         + u8x32::splat(143)
+            // };
+
+            // Here be dragons
+            let a = u8x32::splat(0xf0);
+            let b = u8x32::splat(0x9f);
+
+            // Our "most significant bytes"
+            let mut c = third;
+
+            // Our "least significant byts"
+            let mut d = ((bytes + u8x32::splat(55)) & u8x32::splat(0x3f)) + u8x32::splat(128);
+
+            // Permute the bytes ahead of time so packing doesn't screw up the middle lanes of each
+            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(c) : "{ymm1}"(c) : "cc" : "intel" } }
+            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(d) : "{ymm1}"(d) : "cc" : "intel" } }
+
+            let abh = unsafe { _mm256_unpackhi_epi8(a.as_i8x32(), b.as_i8x32()) };
+            let abl = unsafe { _mm256_unpacklo_epi8(a.as_i8x32(), b.as_i8x32()) };
+
+            // cdh & cdl now contain packed representations of msb lsb msb lsb...
+            let mut cdh = unsafe { _mm256_unpackhi_epi8(c.as_i8x32(), d.as_i8x32()) };
+            let mut cdl = unsafe { _mm256_unpacklo_epi8(c.as_i8x32(), d.as_i8x32()) };
+
+            // Permute 'em again to cancel out the 16-bit packing's middle-lane swapping
+            // We don't permute abh & abl because they're uniform throughout
+            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(cdh) : "{ymm1}"(cdh) : "cc" : "intel" } }
+            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(cdl) : "{ymm1}"(cdl) : "cc" : "intel" } }
+
+            // Pack everything into its final form data. Now 0xf0 0x9f msb lsb...
+            let abcdll = unsafe { _mm256_unpacklo_epi16(i16x16::from(abl), i16x16::from(cdl)) };
+            let abcdlh = unsafe { _mm256_unpackhi_epi16(i16x16::from(abl), i16x16::from(cdl)) };
+            let abcdhl = unsafe { _mm256_unpacklo_epi16(i16x16::from(abh), i16x16::from(cdh)) };
+            let abcdhh = unsafe { _mm256_unpackhi_epi16(i16x16::from(abh), i16x16::from(cdh)) };
+
+            u8x32::from(abcdll).store(out, i);
+            u8x32::from(abcdlh).store(out, i + 32);
+            u8x32::from(abcdhl).store(out, i + 64);
+            u8x32::from(abcdhh).store(out, i + 96);
+            i += 128;
+        }
+    }
+    out
+}
+
+#[cfg(feature = "simd")]
+#[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
+pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     // TODO: SSE this up
     for (i, ch) in buf.iter().enumerate() {
         out[4 * i + 0] = 0xf0;
