@@ -19,3 +19,9 @@ debug = false
 lto = true
 debug-assertions = false
 panic = "abort"
+
+[profile.dev]
+debug = true
+debug-assertions = true
+panic = "unwind"
+codegen-units = 16
