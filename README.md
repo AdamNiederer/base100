@@ -71,10 +71,12 @@ In both scenarios, base💯 compares favorably to GNU base64.
 
 ### SIMD Performance
 
-On a machine supporting AVX2, base💯 gains around 25% performance through a
-decoder written in hand-tuned x86-64 assembly. Support for SSE2 will come soon,
-and I will happily support AVX-512 if some compatible hardware finds its way into
-my hands. Work on a vectorized encoder for AVX2 and SSE2 is also underway.
+On a machine supporting AVX2, base💯 gains a 4x performance boost via some
+hand-tuned x86-64 assembly. Support for SSE2 will come soon, and I will happily
+support AVX-512 if some compatible hardware finds its way into my hands. Work on
+a vectorized encoder for SSE2 is also underway. Note that you must build base💯
+on a compatible machine with nightly rust, an AVX2-capable processor, and
+`RUSTFLAGS="-C target-cpu-native"` to receive this boost.
 
 Please note that the below benchmarks were taken on a significantly weaker
 machine than the above benchmarks, and cannot be directly compared.
@@ -86,8 +88,14 @@ base💯 0.3.0-dirty
 $ base64 --version
 base64 (GNU coreutils) 8.28
 
+$ cat /dev/zero | pv | ./base100 > /dev/null
+ [1.14GiB/s]
+
+$ cat /dev/zero | pv | base64 > /dev/null
+ [ 479MiB/s]
+
 $ cat /dev/zero | pv | ./base100 | ./base100 -d > /dev/null
- [ 191MiB/s]
+ [ 412MiB/s]
 
 $ cat /dev/zero | pv | base64 | base64 -d > /dev/null
  [ 110MiB/s]
