@@ -8,7 +8,7 @@ license = "AGPL-3.0"
 
 [dependencies]
 clap = {version = "2.19", features = ["yaml"]}
-stdsimd = {version = "0.0.2", path = "stdsimd", optional = true}
+stdsimd = {version = "0.0.3", optional = true}
 
 [features]
 simd = ["stdsimd"]
