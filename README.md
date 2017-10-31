@@ -33,13 +33,20 @@ ARGS:
     <input>    The input file to use
 ```
 
-## Caveats
+## Installation
 
-Base💯 is *very* space inefficient. It bloats the size of your data by around 3x,
-and should only be used if you have to display encoded binary data in as few
-__printable__ characters as possible. It is, however, very suitable for human
-interaction. Encoded hashes and checksums become very easy to verify at a glance,
-and take up much less space on a terminal.
+To install base💯, use cargo:
+
+```shell
+$ cargo install base100
+```
+
+base💯 also has an AVX-accelerated implementation, delivering up to 4x faster
+performance. If you have a capable CPU and nightly rust, install it as such:
+
+```shell
+$ RUSTFLAGS="-C target-cpu=native" cargo install base100 --features simd
+```
 
 ## Performance
 
@@ -110,6 +117,14 @@ $ cat /dev/zero | pv | base64 | base64 -d > /dev/null
 ```
 
 In this scenario, base💯 compares very favorably to GNU base64.
+
+## Caveats
+
+Base💯 is *very* space inefficient. It bloats the size of your data by around 3x,
+and should only be used if you have to display encoded binary data in as few
+__printable__ characters as possible. It is, however, very suitable for human
+interaction. Encoded hashes and checksums become very easy to verify at a glance,
+and take up much less space on a terminal.
 
 ## Future plans
 
