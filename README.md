@@ -56,7 +56,7 @@ base💯's performance is very competitive with other encoding algorithms.
 
 ```
 $ base100 --version
-base💯 0.4.0
+base💯 0.4.1
 
 $ base64 --version
 base64 (GNU coreutils) 8.28
@@ -98,7 +98,7 @@ machine than the above benchmarks, and cannot be directly compared.
 
 ```
 $ base100 --version
-base💯 0.4.0
+base💯 0.4.1
 
 $ base64 --version
 base64 (GNU coreutils) 8.28
