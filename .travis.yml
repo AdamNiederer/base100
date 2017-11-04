@@ -1,0 +1,27 @@
+language: rust
+sudo: false
+rust:
+  - stable
+  - beta
+  - nightly
+matrix:
+  fast_finish: true
+  include:
+    - rust: stable
+      env: RUSTFLAGS="-C target-cpu=native"
+    - rust: beta
+      env: RUSTFLAGS="-C target-cpu=native"
+    - rust: nightly
+      env: RUSTFLAGS="-C target-cpu=native"
+    - rust: nightly
+      env: CLIPPY="true"
+  allow_failures:
+    - rust: nightly
+install:
+  - cargo build
+script:
+  - bash -c "[ $TRAVIS_RUST_VERSION == \"nightly\" ] && cargo test --verbose --all || true"
+  - bash -c "[ $TRAVIS_RUST_VERSION == \"nightly\" ] && cargo bench --verbose --all || true"
+notifications:
+  email: false
+cache: cargo
