@@ -1,4 +1,5 @@
 [![crates.io](https://img.shields.io/crates/v/base100.svg)](https://crates.io/crates/base100)
+[![Build Status](https://travis-ci.org/AdamNiederer/base100.svg?branch=master)](https://travis-ci.org/AdamNiederer/base100)
 
 # Base💯
 
