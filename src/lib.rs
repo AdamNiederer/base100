@@ -13,80 +13,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#![allow(non_upper_case_globals)]
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(feature = "simd", feature(asm))]
 #![cfg_attr(feature = "simd", feature(target_feature))]
 #![cfg_attr(feature = "simd", feature(cfg_target_feature))]
 
-#[macro_use] extern crate clap;
 #[cfg(feature = "simd")] extern crate stdsimd;
 
-use std::io::{self, Read, Write, BufRead, BufReader, BufWriter};
-use std::fs::File;
-use std::iter::Iterator;
-use clap::App;
-
-fn main() {
-    let cli_spec = load_yaml!("cli.yml");
-    let cli_args = App::from_yaml(cli_spec).get_matches();
-
-    let mut reader = {
-        if let Some(path) = cli_args.value_of("input") {
-            Box::new(BufReader::new(match File::open(path) {
-                Ok(path) => path,
-                _ => {
-                    writeln!(io::stderr(), "base💯: no such file: {}", path).expect("base💯: stderr write error");
-                    return;
-                }
-            })) as Box<BufRead>
-        } else {
-            Box::new(BufReader::new(io::stdin())) as Box<BufRead>
-        }
-    };
-
-    let mut writer = BufWriter::new(io::stdout());
-
-    if cli_args.is_present("decode") {
-        let mut write_buf = [0u8; 0x10000];
-        let mut buffer = [0u8; 0x10000];
-
-        while let Ok(num_read) = reader.read(&mut buffer) {
-            if num_read == 0 {
-                break;
-            }
-
-            match writer.write_all(&emoji_to_char(&buffer[..num_read], &mut write_buf)[..num_read / 4]) {
-                Ok(_) => (),
-                _ => {
-                    writeln!(io::stderr(), "base💯: write error").expect("base💯: stderr write error");
-                    return;
-                }
-            }
-        }
-    } else {
-        let mut write_buf = [0u8; 0x40000];
-        let mut buffer = [0u8; 0x10000];
-
-        while let Ok(num_read) = reader.read(&mut buffer) {
-            if num_read == 0 {
-                break;
-            }
-
-            match writer.write_all(&char_to_emoji(&buffer[..num_read], &mut write_buf)[..num_read * 4]) {
-                Ok(_) => (),
-                _ => {
-                    writeln!(io::stderr(), "base💯: write error").expect("base💯: stderr write error");
-                    return;
-                }
-            }
-        }
-    }
-    writer.flush().expect("Write error");
-}
-
 #[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
-fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, chunk) in buf.chunks(4).enumerate() {
         out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
     }
