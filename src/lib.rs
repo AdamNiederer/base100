@@ -21,17 +21,30 @@
 
 #[cfg(feature = "simd")] extern crate stdsimd;
 #[cfg(test)] extern crate test;
+#[cfg(feature = "simd")] extern crate  faster;
+#[cfg(feature = "simd")] use faster::*;
 
-#[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
+#[inline(always)]
+#[cfg(not(feature = "simd"))]
 pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, chunk) in buf.chunks(4).enumerate() {
-        out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
+        out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64))
+            .wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
     }
     out
 }
 
-#[cfg(feature = "simd")]
-#[cfg(target_feature = "avx2")]
+#[inline(always)]
+#[cfg(all(feature = "simd", not(target_feature = "avx2")))]
+pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+    buf.simd_iter().stripe_four().zip().simd_map(tuplify!(4, u8s(0)), |(_, _, c, d)| {
+        ((c - u8s(143)) * u8s(64)) + d - u8s(128) - u8s(55)
+    }).scalar_fill(out)
+
+}
+
+#[inline(always)]
+#[cfg(all(feature = "simd", target_feature = "avx2"))]
 pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     use stdsimd::simd::u8x32;
     let mut i = 0;
@@ -108,35 +121,8 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     out
 }
 
-#[cfg(feature = "simd")]
-#[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
-pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    use stdsimd::simd::u8x16;
-    let mut i = 0;
-    for chunk in buf.chunks(64) {
-        // Chunk data format: 0x00 0x00 0xhi 0xlo
-        if chunk.len() < 64 {
-            // Non-SIMD implementation for the final <128 bytes
-            for (i, chunk) in chunk.chunks(4).enumerate() {
-                out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
-            }
-        } else {
-
-            // SSE2 implementation of decoding algo
-
-            // TODO: Use Get rid of these scalar loads
-            let msbs = u8x16::new(chunk[2], chunk[6], chunk[10], chunk[14], chunk[18], chunk[22], chunk[26], chunk[30], chunk[34], chunk[38], chunk[42], chunk[46], chunk[50], chunk[54], chunk[58], chunk[62]);
-            let lsbs = u8x16::new(chunk[3], chunk[7], chunk[11], chunk[15], chunk[19], chunk[23], chunk[27], chunk[31], chunk[35], chunk[39], chunk[43], chunk[47], chunk[51], chunk[55], chunk[59], chunk[63]);
-            ((((msbs - u8x16::splat(143)) * u8x16::splat(64))
-              + lsbs - u8x16::splat(128)) - u8x16::splat(55))
-                .store(out, i);
-            i += 16;
-        }
-    }
-    out
-}
-
-#[cfg(any(not(feature = "simd"), not(target_arch = "x86_64")))]
+#[inline(always)]
+#[cfg(not(feature = "simd"))]
 pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, ch) in buf.iter().enumerate() {
         out[4 * i + 0] = 0xf0;
@@ -149,8 +135,8 @@ pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     out
 }
 
-#[cfg(feature = "simd")]
-#[cfg(target_feature = "avx2")]
+#[inline(always)]
+#[cfg(all(feature = "simd", target_feature = "avx2"))]
 pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     use stdsimd::simd::{u8x32, u16x16, i16x16};
     use stdsimd::vendor::{_mm256_unpackhi_epi8, _mm256_unpacklo_epi8, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16};
@@ -252,8 +238,8 @@ pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     out
 }
 
-#[cfg(feature = "simd")]
-#[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
+#[inline(always)]
+#[cfg(all(feature = "simd", not(target_feature = "avx2")))]
 pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     // TODO: SSE this up
     for (i, ch) in buf.iter().enumerate() {

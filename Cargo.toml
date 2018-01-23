@@ -7,11 +7,12 @@ authors = ["Adam Niederer <Adam.Niederer@gmail.com>"]
 license = "AGPL-3.0"
 
 [dependencies]
-clap = {version = "2.19", features = ["yaml"]}
-stdsimd = {version = "0.0.3", optional = true}
+clap = { version = "2.19", features = ["yaml"] }
+stdsimd = { version = "0.0.3", optional = true }
+faster = { git = "https://github.com/AdamNiederer/faster", branch = "master", optional = true }
 
 [features]
-simd = ["stdsimd"]
+simd = ["stdsimd", "faster"]
 
 [profile.release]
 opt-level = 3
