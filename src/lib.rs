@@ -37,7 +37,7 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
 #[inline(always)]
 #[cfg(all(feature = "simd", not(target_feature = "avx2")))]
 pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    buf.simd_iter().stripe_four().zip().simd_map(tuplify!(4, u8s(0)), |(_, _, c, d)| {
+    buf.stripe_four(tuplify!(4, u8s(0))).zip().simd_map(|(_, _, c, d)| {
         ((c - u8s(143)) * u8s(64)) + d - u8s(128) - u8s(55)
     }).scalar_fill(out)
 
@@ -240,13 +240,43 @@ pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
 
 #[inline(always)]
 #[cfg(all(feature = "simd", not(target_feature = "avx2")))]
-pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    // TODO: SSE this up
-    for (i, ch) in buf.iter().enumerate() {
+pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], mut out: &'b mut [u8]) -> &'b [u8] {
+    let mut i = 0;
+    let mut it = buf.simd_iter(u8s(0));
+
+    // SIMD impl for the majority of the buffer
+    for v in &mut it {
+        let (a, b) = v.upcast();
+        let third = ((a + u16s(55)) / u16s(64) + u16s(143)).saturating_downcast((b + u16s(55)) / u16s(64) + u16s(143));
+        let fourth = ((v + u8s(55)) & u8s(0x3f)) + u8s(128);
+
+        // Make some room for interleaving
+        let (ta, tb) = third.upcast();
+        let (fa, fb) = fourth.upcast();
+
+        // Interleave third and fourth bytes
+        let third_fourth_a = fa.be_u8s().merge_interleaved(ta.be_u8s().flip());
+        let third_fourth_b = fb.be_u8s().merge_interleaved(tb.be_u8s().flip());
+
+        // Make some more room for another interleaving
+        let (tfa, tfb) = third_fourth_a.be_u16s().upcast();
+        let (tfc, tfd) = third_fourth_b.be_u16s().upcast();
+
+        // Interleave a constant 0xf09f with the third and fourth bytes,
+        // and store into out buffer
+        tfa.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i);
+        tfb.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width());
+        tfc.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width() * 2);
+        tfd.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width() * 3);
+        i += v.width() * 4;
+    }
+
+    // Non-SIMD impl for the last few bytes
+    for ch in it.unpack() {
         out[4 * i + 0] = 0xf0;
         out[4 * i + 1] = 0x9f;
         // (ch + 55) >> 6 approximates (ch + 55) / 64
-        out[4 * i + 2] = ((((*ch as u16).wrapping_add(55)) >> 6) + 143) as u8;
+        out[4 * i + 2] = ((((ch as u16).wrapping_add(55)) >> 6) + 143) as u8;
         // (ch + 55) & 0x3f approximates (ch + 55) % 64
         out[4 * i + 3] = (ch.wrapping_add(55) & 0x3f).wrapping_add(128);
     }
@@ -288,8 +318,7 @@ mod tests {
         let out = &mut [0u8; 0x40000];
 
         b.iter(|| {
-            // Inner closure, the actual test
-            black_box(char_to_emoji(in_, out));
+            black_box(char_to_emoji(black_box(in_), black_box(out)));
         });
     }
 
@@ -300,32 +329,27 @@ mod tests {
         let out = &mut [0u8; 0x10000];
 
         b.iter(|| {
-            // Inner closure, the actual test
-            black_box(emoji_to_char(in_, out));
+            black_box(emoji_to_char(black_box(in_), black_box(out)));
         });
     }
 
     #[bench]
     fn bench_char_to_emoji_zero(b: &mut Bencher) {
-        // Optionally include some setup
         let in_ = &[0u8; 0x10000];
         let out = &mut [0u8; 0x40000];
 
         b.iter(|| {
-            // Inner closure, the actual test
-            black_box(char_to_emoji(in_, out));
+            black_box(char_to_emoji(black_box(in_), black_box(out)));
         });
     }
 
     #[bench]
     fn bench_emoji_to_char_zero(b: &mut Bencher) {
-        // Optionally include some setup
         let in_ = &[0u8; 0x40000];
         let out = &mut [0u8; 0x10000];
 
         b.iter(|| {
-            // Inner closure, the actual test
-            black_box(emoji_to_char(in_, out));
+            black_box(emoji_to_char(black_box(in_), black_box(out)));
         });
     }
 
