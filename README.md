@@ -49,6 +49,19 @@ performance. If you have a capable CPU and nightly rust, install it as such:
 $ RUSTFLAGS="-C target-cpu=native" cargo install base100 --features simd
 ```
 
+### Container image
+If you e.g. don't have Cargo installed, you can use container image for simple experiments:
+```shell
+podman pull liry17/base100
+# using file from localhost
+podman run --rm -v $PWD:/workdir liry17/base100 decoded_file
+# or using pipes
+echo "the quick brown fox jumped over the lazy dog" | podman run -i liry17/base100
+# or you can even create alias like
+alias b100='podman run --rm -v $PWD:/workdir liry17/base100'
+b100 decoded
+```
+
 ## Performance
 
 base💯's performance is very competitive with other encoding algorithms.
