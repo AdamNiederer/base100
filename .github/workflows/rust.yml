@@ -18,3 +18,19 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build
       run: cargo build --verbose
+      
+    - name: Zip the Build
+      run: zip -r ${{ secrets.ReleaseZipName }} ./AppName/bin/Release/netcoreapp3.1/ 
+      
+    - name: Create Release and Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        tag_name: ${{ github.ref }}
+        name: Release ${{ github.ref }}
+        body: TODO New Release.
+        draft: false
+        prerelease: false
+        files: |
+          ${{ secrets.ReleaseZipName }}.zip
+          LICENSE 
