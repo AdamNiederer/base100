@@ -1,4 +1,4 @@
-// base💯 - Copyright 2017 Adam Niederer
+// base💯 - Copyright 2017-2025 Adam Niederer
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published by
@@ -14,18 +14,12 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #![cfg_attr(test, feature(test))]
-#![cfg_attr(feature = "simd", feature(asm))]
-#![cfg_attr(feature = "simd", feature(target_feature))]
-#![cfg_attr(feature = "simd", feature(cfg_target_feature))]
-
-#[cfg(feature = "simd")] extern crate stdsimd;
-#[cfg(test)] extern crate test;
-#[cfg(feature = "simd")] extern crate  faster;
-#[cfg(feature = "simd")] use faster::*;
+#![cfg_attr(feature = "simd", feature(portable_simd))]
+#[cfg(feature="simd")] use std::simd::Simd;
+#[cfg(feature="simd")] use std::mem::transmute;
 
 #[inline(always)]
-#[cfg(not(feature = "simd"))]
-pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+pub fn emoji_to_char_scalar<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, chunk) in buf.chunks(4).enumerate() {
         out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64))
             .wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55)
@@ -34,95 +28,49 @@ pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
 }
 
 #[inline(always)]
-#[cfg(all(feature = "simd", not(target_feature = "avx2")))]
+#[cfg(not(feature = "simd"))]
 pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    buf.stripe_four(tuplify!(4, u8s(0))).zip().simd_map(|(_, _, c, d)| {
-        ((c - u8s(143)) * u8s(64)) + d - u8s(128) - u8s(55)
-    }).scalar_fill(out)
-
+    emoji_to_char_scalar(buf, out)
 }
 
 #[inline(always)]
-#[cfg(all(feature = "simd", target_feature = "avx2"))]
+#[cfg(feature="simd")]
 pub fn emoji_to_char<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    use stdsimd::simd::u8x32;
-    let mut i = 0;
-    for chunk in buf.chunks(128) {
-        if chunk.len() < 128 {
-            // Non-SIMD implementation for the final <128 bytes
-            for chunk in chunk.chunks(4) {
-                out[i] = ((chunk[2].wrapping_sub(143)).wrapping_mul(64)).wrapping_add(chunk[3].wrapping_sub(128)).wrapping_sub(55);
-                i += 1;
-            }
-        } else {
-            // AVX implementation of decoding algo
-            // a, b, c, d contain one garbage word and one useful word
-            let a = u8x32::load(chunk, 0);
-            let b = u8x32::load(chunk, 32);
-            let c = u8x32::load(chunk, 64);
-            let d = u8x32::load(chunk, 96);
+    for (i, chunk) in buf.chunks_exact(256).enumerate() {
+        let (a, b, c, d) = unsafe {
+            let ptr = transmute::<_, *const Simd<u16, 32>>(chunk.as_ptr());
+            let a = ptr.add(0).read_unaligned();
+            let b = ptr.add(1).read_unaligned();
+            let c = ptr.add(2).read_unaligned();
+            let d = ptr.add(3).read_unaligned();
+            (a, b, c, d)
+        };
 
-            // Constant mask for removing low bytes
-            let hi_mask = u8x32::new(0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
-                                     0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00);
+        let (_, alo) = a.deinterleave(b);
+        let (_, blo) = c.deinterleave(d);
 
-            // Results from the vector magic below
-            let hi: u8x32;
-            let lo: u8x32;
+        // shouldn't be an architecture where transmuting into a smaller simd type would cause alignment issues
+        let alo8 = unsafe { transmute::<_, Simd<u8, 64>>(alo) };
+        let blo8 = unsafe { transmute::<_, Simd<u8, 64>>(blo) };
 
-            unsafe {
-                asm! {
-                    "vpsrld ymm1, ymm1, 16
-                     vpsrld ymm2, ymm2, 16
-                     vpsrld ymm3, ymm3, 16
-                     vpsrld ymm4, ymm4, 16
-                     // ymm1 .. ymm4 now contain 0x00, 0x00, 0xhi, 0xlo ...
+        let (x, y) = alo8.deinterleave(blo8);
 
-                     // Pack ymm* into ymm1 and ymm2 and order them properly
-                     vpackusdw ymm1, ymm1, ymm2
-                     vpackusdw ymm2, ymm3, ymm4
-                     // vpackusdw interleaves ymm[13] and ymm[24]; we want them end-to-end
-                     vpermpd ymm1, ymm1, 0xD8 // [191:128] <-> [127:64]
-                     vpermpd ymm2, ymm2, 0xD8 // [191:128] <-> [127:64]
-                     // ymm1 and ymm2 now contain interleaved high and low bytes
+        use std::ops::{Sub, Mul, Add}; // TODO: use wrapping sub + mul + add instead
+        let res = ((x.sub(Simd::splat(143))).mul(Simd::splat(64)))
+            .add(y.sub(Simd::splat(128)).sub(Simd::splat(55)));
 
-                     // Store high bytes (0xhi 0x00) in ymm3 and ymm4
-                     vpand ymm3, ymm1, ymm6
-                     vpand ymm4, ymm2, ymm6
-                     // Pack hi bytes into ymm4
-                     vpackuswb ymm4, ymm3, ymm4
-
-                     // Remove the high bytes and move low bytes into position
-                     vpsrlw ymm1, ymm1, 8
-                     vpsrlw ymm2, ymm2, 8
-                     // Store low bytes in ymm3
-                     vpackuswb ymm3, ymm1, ymm2
-
-                     // Fight interleaving again
-                     vpermpd ymm4, ymm4, 0xD8 // [191:128] <-> [127:64]
-                     vpermpd ymm3, ymm3, 0xD8 // [191:128] <-> [127:64]"
-                     : "={ymm3}"(lo), "={ymm4}"(hi)
-                     : "{ymm1}"(a), "{ymm2}"(b), "{ymm3}"(c),
-                       "{ymm4}"(d), "{ymm6}"(hi_mask)
-                     : "cc"
-                     : "intel"
-                }
-            }
-
-            ((((hi - u8x32::splat(143)) * u8x32::splat(64))
-              + lo - u8x32::splat(128)) - u8x32::splat(55))
-                .store(out, i);
-            i += 32;
-        }
+        res.copy_to_slice(&mut out[(i * 64)..(i * 64 + 64)]);
     }
+
+    let tail_buf = buf.len() - buf.len() % 256;
+    let tail_out = tail_buf / 4;
+    emoji_to_char_scalar(&buf[tail_buf..], &mut out[tail_out..]);
+
     out
 }
 
 #[inline(always)]
-#[cfg(not(feature = "simd"))]
-pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+pub fn char_to_emoji_scalar<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
     for (i, ch) in buf.iter().enumerate() {
         out[4 * i + 0] = 0xf0;
         out[4 * i + 1] = 0x9f;
@@ -135,157 +83,57 @@ pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
 }
 
 #[inline(always)]
-#[cfg(all(feature = "simd", target_feature = "avx2"))]
+#[cfg(not(feature = "simd"))]
 pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
-    use stdsimd::simd::{u8x32, u16x16, i16x16};
-    use stdsimd::vendor::{_mm256_unpackhi_epi8, _mm256_unpacklo_epi8, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16};
-
-    let mut i = 0;
-    for chunk in buf.chunks(32) {
-        if chunk.len() < 32 {
-            // Non-SIMD implementation for the final <128 bytes
-            for (i, ch) in buf.iter().enumerate() {
-                out[4 * i + 0] = 0xf0;
-                out[4 * i + 1] = 0x9f;
-                // (ch + 55) >> 6 approximates (ch + 55) / 64
-                out[4 * i + 2] = ((((*ch as u16).wrapping_add(55)) >> 6) + 143) as u8;
-                // (ch + 55) & 0x3f approximates (ch + 55) % 64
-                out[4 * i + 3] = (ch.wrapping_add(55) & 0x3f).wrapping_add(128);
-            }
-        } else {
-
-            let bytes = u8x32::load(chunk, 0);
-            let asm_out: u8x32;
-            // Constant mask for removing high bytes
-            let lo_mask = u8x32::new(0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
-                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
-                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
-                                     0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF);
-
-            // Do the cast-to-u16 addition, shift right, then cast back down to u8.
-            unsafe {
-                asm! {
-                    "// Cast each byte to a word, moving to ymm1 and ymm2
-                     vmovddup ymm2, ymm1
-                     vandpd ymm2, ymm2, ymm3
-                     vpsrlw ymm1, ymm1, 8
-                     // ymm1 now contains the high bytes as u16s
-                     // ymm2 now contains the low bytes as u16s
-                     // Do the 16-bit addition
-                     vpaddw ymm1, ymm1, ymm4
-                     vpaddw ymm2, ymm1, ymm4
-                     // Shift right and convert back to u8s
-                     vpsrlw ymm1, ymm1, 6
-                     vpsrlw ymm2, ymm2, 6
-                     vpackuswb ymm1, ymm1, ymm2
-                     // Prevent interleaving
-                     vpermpd ymm4, ymm4, 0xD8 // [191:128] <-> [127:64]"
-                     : "={ymm1}"(asm_out)
-                     : "{ymm1}"(bytes), "{ymm3}"(lo_mask), "{ymm4}"(u16x16::splat(31)) // TODO: Why is this not 55?
-                     : "cc ymm2"
-                     : "intel"
-                }
-            }
-
-            let third = asm_out + u8x32::splat(143);
-            // let third = unsafe {
-            //     TODO: Replace above ASM with this
-            //     _mm256_packus_epi16(((i16x16::from(bytes) >> 8) + i16x16::splat(55)) >> 6,
-            //                         (i16x16::from(bytes & lo_mask) + i16x16::splat(55)) >> 6)
-            //         + u8x32::splat(143)
-            // };
-
-            // Here be dragons
-            let a = u8x32::splat(0xf0);
-            let b = u8x32::splat(0x9f);
-
-            // Our "most significant bytes"
-            let mut c = third;
-
-            // Our "least significant byts"
-            let mut d = ((bytes + u8x32::splat(55)) & u8x32::splat(0x3f)) + u8x32::splat(128);
-
-            // Permute the bytes ahead of time so packing doesn't screw up the middle lanes of each
-            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(c) : "{ymm1}"(c) : "cc" : "intel" } }
-            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(d) : "{ymm1}"(d) : "cc" : "intel" } }
-
-            let abh = unsafe { _mm256_unpackhi_epi8(a.as_i8x32(), b.as_i8x32()) };
-            let abl = unsafe { _mm256_unpacklo_epi8(a.as_i8x32(), b.as_i8x32()) };
-
-            // cdh & cdl now contain packed representations of msb lsb msb lsb...
-            let mut cdh = unsafe { _mm256_unpackhi_epi8(c.as_i8x32(), d.as_i8x32()) };
-            let mut cdl = unsafe { _mm256_unpacklo_epi8(c.as_i8x32(), d.as_i8x32()) };
-
-            // Permute 'em again to cancel out the 16-bit packing's middle-lane swapping
-            // We don't permute abh & abl because they're uniform throughout
-            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(cdh) : "{ymm1}"(cdh) : "cc" : "intel" } }
-            unsafe { asm!{ "vpermpd ymm1, ymm1, 0xD8" : "={ymm1}"(cdl) : "{ymm1}"(cdl) : "cc" : "intel" } }
-
-            // Pack everything into its final form data. Now 0xf0 0x9f msb lsb...
-            let abcdll = unsafe { _mm256_unpacklo_epi16(i16x16::from(abl), i16x16::from(cdl)) };
-            let abcdlh = unsafe { _mm256_unpackhi_epi16(i16x16::from(abl), i16x16::from(cdl)) };
-            let abcdhl = unsafe { _mm256_unpacklo_epi16(i16x16::from(abh), i16x16::from(cdh)) };
-            let abcdhh = unsafe { _mm256_unpackhi_epi16(i16x16::from(abh), i16x16::from(cdh)) };
-
-            u8x32::from(abcdll).store(out, i);
-            u8x32::from(abcdlh).store(out, i + 32);
-            u8x32::from(abcdhl).store(out, i + 64);
-            u8x32::from(abcdhh).store(out, i + 96);
-            i += 128;
-        }
-    }
-    out
+    char_to_emoji_scalar(buf, out)
 }
 
 #[inline(always)]
-#[cfg(all(feature = "simd", not(target_feature = "avx2")))]
-pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], mut out: &'b mut [u8]) -> &'b [u8] {
-    let mut i = 0;
-    let mut it = buf.simd_iter(u8s(0));
+#[cfg(feature = "simd")]
+pub fn char_to_emoji<'a, 'b>(buf: &'a [u8], out: &'b mut [u8]) -> &'b [u8] {
+    for (i, chunk) in buf.chunks_exact(64).enumerate() {
+        let (hi, lo) = unsafe {
+            let ptr = transmute::<_, *const Simd<u16, 32>>(chunk.as_ptr());
+            let hi = ptr.read_unaligned();
+            let lo = ptr.read_unaligned();
+            (hi >> Simd::splat(8), lo & Simd::splat(0xff))
+        };
 
-    // SIMD impl for the majority of the buffer
-    for v in &mut it {
-        let (a, b) = v.upcast();
-        let third = ((a + u16s(55)) / u16s(64) + u16s(143)).saturating_downcast((b + u16s(55)) / u16s(64) + u16s(143));
-        let fourth = ((v + u8s(55)) & u8s(0x3f)) + u8s(128);
+        use std::ops::Add; // TODO: use wrapping add instead
+        let hix = (hi.add(Simd::splat(55)) & Simd::splat(0x03f)).add(Simd::splat(128));
+        let lox = (lo.add(Simd::splat(55)) & Simd::splat(0x03f)).add(Simd::splat(128));
 
-        // Make some room for interleaving
-        let (ta, tb) = third.upcast();
-        let (fa, fb) = fourth.upcast();
+        let hiy = (hi.add(Simd::splat(55)) >> Simd::splat(6)).add(Simd::splat(143));
+        let loy = (lo.add(Simd::splat(55)) >> Simd::splat(6)).add(Simd::splat(143));
 
-        // Interleave third and fourth bytes
-        let third_fourth_a = fa.be_u8s().merge_interleaved(ta.be_u8s().flip());
-        let third_fourth_b = fb.be_u8s().merge_interleaved(tb.be_u8s().flip());
+        let hixy = (hix << 8) | hiy;
+        let loxy = (lox << 8) | loy;
 
-        // Make some more room for another interleaving
-        let (tfa, tfb) = third_fourth_a.be_u16s().upcast();
-        let (tfc, tfd) = third_fourth_b.be_u16s().upcast();
+        let (xya, xyb) = loxy.interleave(hixy);
 
-        // Interleave a constant 0xf09f with the third and fourth bytes,
-        // and store into out buffer
-        tfa.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i);
-        tfb.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width());
-        tfc.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width() * 2);
-        tfd.be_u16s().merge_interleaved(u32s(0xf09fdead).be_u16s()).be_u32s().swap_bytes().be_u8s().store(&mut out, i + v.width() * 3);
-        i += v.width() * 4;
+        let (a, b) = Simd::splat(0x9ff0).interleave(xya);
+        let (c, d) = Simd::splat(0x9ff0).interleave(xyb);
+
+        unsafe { transmute::<_, Simd<u8, 64>>(a) }.copy_to_slice(&mut out[(i * 256)..(i * 256 + 64)]);
+        unsafe { transmute::<_, Simd<u8, 64>>(b) }.copy_to_slice(&mut out[(i * 256 + 64)..(i * 256 + 128)]);
+        unsafe { transmute::<_, Simd<u8, 64>>(c) }.copy_to_slice(&mut out[(i * 256 + 128)..(i * 256 + 192)]);
+        unsafe { transmute::<_, Simd<u8, 64>>(d) }.copy_to_slice(&mut out[(i * 256 + 192)..(i * 256 + 256)]);
     }
 
-    // Non-SIMD impl for the last few bytes
-    for ch in it.unpack() {
-        out[4 * i + 0] = 0xf0;
-        out[4 * i + 1] = 0x9f;
-        // (ch + 55) >> 6 approximates (ch + 55) / 64
-        out[4 * i + 2] = ((((ch as u16).wrapping_add(55)) >> 6) + 143) as u8;
-        // (ch + 55) & 0x3f approximates (ch + 55) % 64
-        out[4 * i + 3] = (ch.wrapping_add(55) & 0x3f).wrapping_add(128);
-    }
+    let tail_buf = buf.len() - buf.len() % 64;
+    let tail_out = tail_buf * 4;
+    char_to_emoji_scalar(&buf[tail_buf..], &mut out[tail_out..]);
+
     out
 }
+
+#[cfg(test)] extern crate test;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test::{Bencher, black_box};
+    use test::bench::Bencher;
+    use std::hint::black_box;
     use std::ops::RangeInclusive;
 
     #[test]
@@ -309,7 +157,6 @@ mod tests {
         let expected: &[u8] = &[240, 159, 143, 183, 240, 159, 143, 184, 240, 159, 143, 185, 240, 159, 143, 186, 240, 159, 143, 187, 240, 159, 143, 188, 240, 159, 143, 189, 240, 159, 143, 190, 240, 159, 143, 191, 240, 159, 144, 128, 240, 159, 144, 129, 240, 159, 144, 130, 240, 159, 144, 131, 240, 159, 144, 132, 240, 159, 144, 133, 240, 159, 144, 134, 240, 159, 144, 135, 240, 159, 144, 136, 240, 159, 144, 137, 240, 159, 144, 138, 240, 159, 144, 139, 240, 159, 144, 140, 240, 159, 144, 141, 240, 159, 144, 142, 240, 159, 144, 143, 240, 159, 144, 144, 240, 159, 144, 145, 240, 159, 144, 146, 240, 159, 144, 147, 240, 159, 144, 148, 240, 159, 144, 149, 240, 159, 144, 150, 240, 159, 144, 151, 240, 159, 144, 152, 240, 159, 144, 153, 240, 159, 144, 154, 240, 159, 144, 155, 240, 159, 144, 156, 240, 159, 144, 157, 240, 159, 144, 158, 240, 159, 144, 159, 240, 159, 144, 160, 240, 159, 144, 161, 240, 159, 144, 162, 240, 159, 144, 163, 240, 159, 144, 164, 240, 159, 144, 165, 240, 159, 144, 166, 240, 159, 144, 167, 240, 159, 144, 168, 240, 159, 144, 169, 240, 159, 144, 170, 240, 159, 144, 171, 240, 159, 144, 172, 240, 159, 144, 173, 240, 159, 144, 174, 240, 159, 144, 175, 240, 159, 144, 176, 240, 159, 144, 177, 240, 159, 144, 178, 240, 159, 144, 179, 240, 159, 144, 180, 240, 159, 144, 181, 240, 159, 144, 182, 240, 159, 144, 183, 240, 159, 144, 184, 240, 159, 144, 185, 240, 159, 144, 186, 240, 159, 144, 187, 240, 159, 144, 188, 240, 159, 144, 189, 240, 159, 144, 190, 240, 159, 144, 191, 240, 159, 145, 128, 240, 159, 145, 129, 240, 159, 145, 130, 240, 159, 145, 131, 240, 159, 145, 132, 240, 159, 145, 133, 240, 159, 145, 134, 240, 159, 145, 135, 240, 159, 145, 136, 240, 159, 145, 137, 240, 159, 145, 138, 240, 159, 145, 139, 240, 159, 145, 140, 240, 159, 145, 141, 240, 159, 145, 142, 240, 159, 145, 143, 240, 159, 145, 144, 240, 159, 145, 145, 240, 159, 145, 146, 240, 159, 145, 147, 240, 159, 145, 148, 240, 159, 145, 149, 240, 159, 145, 150, 240, 159, 145, 151, 240, 159, 145, 152, 240, 159, 145, 153, 240, 159, 145, 154, 240, 159, 145, 155, 240, 159, 145, 156, 240, 159, 145, 157, 240, 159, 145, 158, 240, 159, 145, 159, 240, 159, 145, 160, 240, 159, 145, 161, 240, 159, 145, 162, 240, 159, 145, 163, 240, 159, 145, 164, 240, 159, 145, 165, 240, 159, 145, 166, 240, 159, 145, 167, 240, 159, 145, 168, 240, 159, 145, 169, 240, 159, 145, 170, 240, 159, 145, 171, 240, 159, 145, 172, 240, 159, 145, 173, 240, 159, 145, 174, 240, 159, 145, 175, 240, 159, 145, 176, 240, 159, 145, 177, 240, 159, 145, 178, 240, 159, 145, 179, 240, 159, 145, 180, 240, 159, 145, 181, 240, 159, 145, 182, 240, 159, 145, 183, 240, 159, 145, 184, 240, 159, 145, 185, 240, 159, 145, 186, 240, 159, 145, 187, 240, 159, 145, 188, 240, 159, 145, 189, 240, 159, 145, 190, 240, 159, 145, 191, 240, 159, 146, 128, 240, 159, 146, 129, 240, 159, 146, 130, 240, 159, 146, 131, 240, 159, 146, 132, 240, 159, 146, 133, 240, 159, 146, 134, 240, 159, 146, 135, 240, 159, 146, 136, 240, 159, 146, 137, 240, 159, 146, 138, 240, 159, 146, 139, 240, 159, 146, 140, 240, 159, 146, 141, 240, 159, 146, 142, 240, 159, 146, 143, 240, 159, 146, 144, 240, 159, 146, 145, 240, 159, 146, 146, 240, 159, 146, 147, 240, 159, 146, 148, 240, 159, 146, 149, 240, 159, 146, 150, 240, 159, 146, 151, 240, 159, 146, 152, 240, 159, 146, 153, 240, 159, 146, 154, 240, 159, 146, 155, 240, 159, 146, 156, 240, 159, 146, 157, 240, 159, 146, 158, 240, 159, 146, 159, 240, 159, 146, 160, 240, 159, 146, 161, 240, 159, 146, 162, 240, 159, 146, 163, 240, 159, 146, 164, 240, 159, 146, 165, 240, 159, 146, 166, 240, 159, 146, 167, 240, 159, 146, 168, 240, 159, 146, 169, 240, 159, 146, 170, 240, 159, 146, 171, 240, 159, 146, 172, 240, 159, 146, 173, 240, 159, 146, 174, 240, 159, 146, 175, 240, 159, 146, 176, 240, 159, 146, 177, 240, 159, 146, 178, 240, 159, 146, 179, 240, 159, 146, 180, 240, 159, 146, 181, 240, 159, 146, 182, 240, 159, 146, 183, 240, 159, 146, 184, 240, 159, 146, 185, 240, 159, 146, 186, 240, 159, 146, 187, 240, 159, 146, 188, 240, 159, 146, 189, 240, 159, 146, 190, 240, 159, 146, 191, 240, 159, 147, 128, 240, 159, 147, 129, 240, 159, 147, 130, 240, 159, 147, 131, 240, 159, 147, 132, 240, 159, 147, 133, 240, 159, 147, 134, 240, 159, 147, 135, 240, 159, 147, 136, 240, 159, 147, 137, 240, 159, 147, 138, 240, 159, 147, 139, 240, 159, 147, 140, 240, 159, 147, 141, 240, 159, 147, 142, 240, 159, 147, 143, 240, 159, 147, 144, 240, 159, 147, 145, 240, 159, 147, 146, 240, 159, 147, 147, 240, 159, 147, 148, 240, 159, 147, 149, 240, 159, 147, 150, 240, 159, 147, 151, 240, 159, 147, 152, 240, 159, 147, 153, 240, 159, 147, 154, 240, 159, 147, 155, 240, 159, 147, 156, 240, 159, 147, 157, 240, 159, 147, 158, 240, 159, 147, 159, 240, 159, 147, 160, 240, 159, 147, 161, 240, 159, 147, 162, 240, 159, 147, 163, 240, 159, 147, 164, 240, 159, 147, 165, 240, 159, 147, 166, 240, 159, 147, 167, 240, 159, 147, 168, 240, 159, 147, 169, 240, 159, 147, 170, 240, 159, 147, 171, 240, 159, 147, 172, 240, 159, 147, 173, 240, 159, 147, 174, 240, 159, 147, 175, 240, 159, 147, 176, 240, 159, 147, 177, 240, 159, 147, 178, 240, 159, 147, 179, 240, 159, 147, 180, 240, 159, 147, 181, 240, 159, 147, 182];
         assert_eq!(emoji_to_char(expected, &mut [0u8; 0x100]), RangeInclusive::new(0,255).collect::<Vec<u8>>().as_slice());
     }
-
 
     #[bench]
     fn bench_char_to_emoji_uniform(b: &mut Bencher) {

@@ -33,9 +33,9 @@ fn main() {
                     writeln!(io::stderr(), "base💯: no such file: {}", path).expect("base💯: stderr write error");
                     return;
                 }
-            })) as Box<BufRead>
+            })) as Box<dyn BufRead>
         } else {
-            Box::new(BufReader::new(io::stdin())) as Box<BufRead>
+            Box::new(BufReader::new(io::stdin())) as Box<dyn BufRead>
         }
     };
 
